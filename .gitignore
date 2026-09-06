@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment variables / API keys
+.env
+.env.*
+
+# Hugging Face cache
+.cache/
+huggingface/
+
+# Python cache
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
