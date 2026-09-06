@@ -1,0 +1,9 @@
+expense_id,employee_id,date,category,description,amount,status
+EXP001,EMP001,2026-08-01,Travel,Flight to Mumbai,4500,Approved
+EXP002,EMP001,2026-08-05,Food,Client lunch,1200,Approved
+EXP003,EMP001,2026-08-12,Travel,Cab to airport,850,Approved
+EXP004,EMP002,2026-08-03,Travel,Flight to Bangalore,5200,Approved
+EXP005,EMP002,2026-08-10,Food,Team lunch,1500,Pending
+EXP006,EMP003,2026-08-15,Travel,Train ticket,2800,Approved
+EXP007,EMP004,2026-08-18,Equipment,Keyboard,1800,Approved
+EXP008,EMP005,2026-08-20,Travel,Flight to Chennai,4800,Approved

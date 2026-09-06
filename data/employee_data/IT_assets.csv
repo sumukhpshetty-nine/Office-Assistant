@@ -1,0 +1,7 @@
+asset_id,employee_id,asset_type,asset_name,serial_number,status,assigned_date
+IT001,EMP001,Laptop,Dell Latitude 5440,DL5440-001,Assigned,2026-07-01
+IT002,EMP001,Monitor,Dell 24 inch Monitor,MON-001,Assigned,2026-07-01
+IT003,EMP002,Laptop,Lenovo ThinkPad E14,LTP-E14-002,Assigned,2026-06-15
+IT004,EMP003,Laptop,Dell Latitude 5430,DL5430-003,Assigned,2026-05-20
+IT005,EMP004,Laptop,HP EliteBook 840,HP840-004,Assigned,2026-07-10
+IT006,EMP005,Laptop,Lenovo ThinkPad E14,LTP-E14-005,Assigned,2026-06-25
