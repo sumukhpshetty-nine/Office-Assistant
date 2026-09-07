@@ -5,54 +5,77 @@ TechNova Pvt. Ltd. Office Assistant
 This file:
 1. Reads policy PDFs from data/documents/
 2. Extracts text and keeps the PDF filename as metadata
-3. Splits documents into overlapping chunks
+3. Splits documents into sentence-aware overlapping chunks
 4. Creates local sentence-transformer embeddings
 5. Stores vectors in a FAISS index
 6. Retrieves the most relevant policy chunks
-7. Optionally sends retrieved context to an LLM for a grounded answer
-8. Returns the source PDF names for citation
+7. Optionally sends retrieved context to Gemini
+8. Returns source PDF names and page numbers
 
 Run:
     pip install -r requirements.txt
-    python p1_rag.py
+    python person1/p1_rag.py
 
-For a retrieval-only test, the program works without an API key.
-For LLM answers, create .env with:
+For retrieval-only testing:
+    No API key is required.
+
+For Gemini-generated answers, create a .env file:
     GEMINI_API_KEY=your_key_here
 """
 
 import os
+import re
+from pathlib import Path
+from typing import Dict, List
+
+
+# -------------------------------------------------------------------
+# SSL CONFIGURATION
+# -------------------------------------------------------------------
 
 # Use the Ubuntu system CA bundle for HTTPS connections.
-# This keeps SSL verification enabled.
+# SSL verification remains enabled.
 SYSTEM_CA = "/etc/ssl/certs/ca-certificates.crt"
+
 os.environ["REQUESTS_CA_BUNDLE"] = SYSTEM_CA
 os.environ["SSL_CERT_FILE"] = SYSTEM_CA
 os.environ["CURL_CA_BUNDLE"] = SYSTEM_CA
 
-from pathlib import Path
-from typing import List, Dict, Tuple
-import re
 
-import numpy as np
+# -------------------------------------------------------------------
+# THIRD-PARTY IMPORTS
+# -------------------------------------------------------------------
+
 import faiss
-from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
+import numpy as np
 from dotenv import load_dotenv
 from google import genai
+from pypdf import PdfReader
+from sentence_transformers import SentenceTransformer
 
+
+# -------------------------------------------------------------------
+# CONFIGURATION
+# -------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
+
+# If this script is inside person1/, documents should be inside:
+# person1/data/documents/
 DOCUMENT_DIR = BASE_DIR / "data" / "documents"
 
-# A small, good general-purpose local embedding model.
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
-# RAG settings. Keep these simple for the capstone.
 CHUNK_SIZE = 700
 CHUNK_OVERLAP = 120
 TOP_K = 4
 
+GEMINI_MODEL = "gemini-3.6-flash"
+
+
+# -------------------------------------------------------------------
+# POLICY RAG CLASS
+# -------------------------------------------------------------------
 
 class PolicyRAG:
     """Build and query a vector index over company policy PDFs."""
@@ -63,14 +86,22 @@ class PolicyRAG:
         model_name: str = EMBEDDING_MODEL,
     ):
         self.document_dir = Path(document_dir)
+
+        print(f"Loading embedding model: {model_name}")
         self.model = SentenceTransformer(model_name)
+
         self.chunks: List[Dict] = []
         self.index = None
 
-    # ---------- 1. LOAD PDFS ----------
+    # ----------------------------------------------------------------
+    # 1. LOAD PDFS
+    # ----------------------------------------------------------------
 
     def load_pdfs(self) -> List[Dict]:
-        """Extract text from every PDF and attach its source filename."""
+        """
+        Extract text from every PDF and attach source filename
+        and page number as metadata.
+        """
         documents = []
 
         pdf_files = sorted(self.document_dir.glob("*.pdf"))
@@ -80,16 +111,19 @@ class PolicyRAG:
                 f"No PDF files found in: {self.document_dir}"
             )
 
+        print(f"Found {len(pdf_files)} PDF files.")
+
         for pdf_path in pdf_files:
+            print(f"Reading: {pdf_path.name}")
+
             reader = PdfReader(str(pdf_path))
-            pages = []
 
             for page_number, page in enumerate(reader.pages, start=1):
                 text = page.extract_text() or ""
                 text = self.clean_text(text)
 
                 if text:
-                    pages.append(
+                    documents.append(
                         {
                             "text": text,
                             "source": pdf_path.name,
@@ -97,59 +131,154 @@ class PolicyRAG:
                         }
                     )
 
-            documents.extend(pages)
+        print(f"Extracted text from {len(documents)} pages.")
 
         return documents
 
+    # ----------------------------------------------------------------
+    # 2. CLEAN TEXT
+    # ----------------------------------------------------------------
+
     @staticmethod
     def clean_text(text: str) -> str:
-        """Remove unnecessary whitespace while preserving readable text."""
+        """
+        Remove unnecessary whitespace while preserving readable text.
+        """
         text = re.sub(r"\s+", " ", text)
         return text.strip()
 
-    # ---------- 2. CHUNKING ----------
+    # ----------------------------------------------------------------
+    # 3. SENTENCE-AWARE CHUNKING
+    # ----------------------------------------------------------------
 
     def create_chunks(self, documents: List[Dict]) -> List[Dict]:
         """
-        Split each page into overlapping chunks.
+        Split each page into sentence-aware overlapping chunks.
 
-        Metadata is retained so the final answer can cite the exact PDF/page.
+        This avoids cutting words and sentences in the middle.
+        Metadata is retained for PDF/page citations.
         """
         chunks = []
 
         for doc in documents:
-            text = doc["text"]
-            start = 0
+            text = self.clean_text(doc["text"])
 
-            while start < len(text):
-                end = min(start + CHUNK_SIZE, len(text))
-                chunk_text = text[start:end].strip()
+            if not text:
+                continue
 
-                if chunk_text:
+            # Split on sentence-ending punctuation.
+            # Punctuation is preserved.
+            sentences = re.split(
+                r"(?<=[.!?])\s+",
+                text,
+            )
+
+            current_sentences = []
+            current_length = 0
+
+            for sentence in sentences:
+                sentence = sentence.strip()
+
+                if not sentence:
+                    continue
+
+                sentence_length = len(sentence)
+
+                # Add sentence if it fits in the current chunk.
+                # A long individual sentence is allowed as its own chunk.
+                if (
+                    current_length + sentence_length + 1 <= CHUNK_SIZE
+                    or not current_sentences
+                ):
+                    current_sentences.append(sentence)
+                    current_length += sentence_length + 1
+
+                else:
+                    # Save the current chunk.
+                    chunk_text = " ".join(current_sentences).strip()
+
+                    if chunk_text:
+                        chunks.append(
+                            {
+                                "text": chunk_text,
+                                "source": doc["source"],
+                                "page": doc["page"],
+                            }
+                        )
+
+                    # Keep recent sentences as overlap.
+                    overlap_sentences = []
+                    overlap_length = 0
+
+                    for previous_sentence in reversed(
+                        current_sentences
+                    ):
+                        previous_length = len(previous_sentence) + 1
+
+                        if (
+                            overlap_length + previous_length
+                            > CHUNK_OVERLAP
+                        ):
+                            break
+
+                        overlap_sentences.insert(
+                            0,
+                            previous_sentence,
+                        )
+
+                        overlap_length += previous_length
+
+                    # Start the next chunk with overlap plus
+                    # the current sentence.
+                    current_sentences = (
+                        overlap_sentences + [sentence]
+                    )
+
+                    current_length = sum(
+                        len(item) + 1
+                        for item in current_sentences
+                    )
+
+            # Save the final remaining chunk.
+            if current_sentences:
+                final_chunk = " ".join(
+                    current_sentences
+                ).strip()
+
+                if final_chunk:
                     chunks.append(
                         {
-                            "text": chunk_text,
+                            "text": final_chunk,
                             "source": doc["source"],
                             "page": doc["page"],
                         }
                     )
 
-                if end >= len(text):
-                    break
-
-                start = end - CHUNK_OVERLAP
-
         self.chunks = chunks
+
+        print(f"Created {len(chunks)} chunks.")
+
         return chunks
 
-    # ---------- 3. EMBEDDINGS + VECTOR DB ----------
+    # ----------------------------------------------------------------
+    # 4. EMBEDDINGS + FAISS VECTOR DATABASE
+    # ----------------------------------------------------------------
 
     def build_index(self) -> None:
-        """Create embeddings and a FAISS cosine-similarity index."""
+        """
+        Create embeddings and a FAISS cosine-similarity index.
+        """
         if not self.chunks:
-            raise ValueError("No chunks available. Run create_chunks() first.")
+            raise ValueError(
+                "No chunks available. Run create_chunks() first."
+            )
 
-        texts = [item["text"] for item in self.chunks]
+        texts = [
+            item["text"]
+            for item in self.chunks
+        ]
+
+        print("Creating embeddings...")
 
         embeddings = self.model.encode(
             texts,
@@ -160,18 +289,33 @@ class PolicyRAG:
 
         dimension = embeddings.shape[1]
 
-        # Inner product on normalized vectors = cosine similarity.
+        # Inner product on normalized vectors is cosine similarity.
         self.index = faiss.IndexFlatIP(dimension)
+
         self.index.add(embeddings)
 
-    # ---------- 4. RETRIEVAL ----------
+        print(
+            f"FAISS index created with {self.index.ntotal} vectors."
+        )
 
-    def search(self, query: str, top_k: int = TOP_K) -> List[Dict]:
-        """Retrieve the most relevant policy chunks for a user query."""
+    # ----------------------------------------------------------------
+    # 5. RETRIEVAL
+    # ----------------------------------------------------------------
+
+    def search(
+        self,
+        query: str,
+        top_k: int = TOP_K,
+    ) -> List[Dict]:
+        """
+        Retrieve the most relevant policy chunks for a query.
+        """
         if self.index is None:
-            raise ValueError("Index is not built. Call build_index() first.")
+            raise ValueError(
+                "Index is not built. Call build_index() first."
+            )
 
-        if not query.strip():
+        if not query or not query.strip():
             return []
 
         query_embedding = self.model.encode(
@@ -180,31 +324,52 @@ class PolicyRAG:
             normalize_embeddings=True,
         ).astype("float32")
 
+        number_of_results = min(
+            top_k,
+            len(self.chunks),
+        )
+
         scores, indices = self.index.search(
             query_embedding,
-            min(top_k, len(self.chunks)),
+            number_of_results,
         )
 
         results = []
 
-        for score, index_position in zip(scores[0], indices[0]):
+        for score, index_position in zip(
+            scores[0],
+            indices[0],
+        ):
             if index_position == -1:
                 continue
 
-            item = dict(self.chunks[index_position])
+            item = dict(
+                self.chunks[index_position]
+            )
+
             item["score"] = float(score)
+
             results.append(item)
 
         return results
 
-    # ---------- 5. CONTEXT + CITATIONS ----------
+    # ----------------------------------------------------------------
+    # 6. BUILD LLM CONTEXT
+    # ----------------------------------------------------------------
 
     @staticmethod
-    def build_context(results: List[Dict]) -> str:
-        """Convert retrieved chunks into grounded LLM context."""
+    def build_context(
+        results: List[Dict],
+    ) -> str:
+        """
+        Convert retrieved chunks into grounded LLM context.
+        """
         blocks = []
 
-        for number, result in enumerate(results, start=1):
+        for number, result in enumerate(
+            results,
+            start=1,
+        ):
             blocks.append(
                 f"[Source {number}]\n"
                 f"File: {result['source']}\n"
@@ -214,14 +379,25 @@ class PolicyRAG:
 
         return "\n\n".join(blocks)
 
+    # ----------------------------------------------------------------
+    # 7. BUILD CITATIONS
+    # ----------------------------------------------------------------
+
     @staticmethod
-    def build_citations(results: List[Dict]) -> List[str]:
-        """Return unique PDF/page citations."""
+    def build_citations(
+        results: List[Dict],
+    ) -> List[str]:
+        """
+        Return unique PDF/page citations.
+        """
         citations = []
         seen = set()
 
         for result in results:
-            citation = f"{result['source']} (page {result['page']})"
+            citation = (
+                f"{result['source']} "
+                f"(page {result['page']})"
+            )
 
             if citation not in seen:
                 citations.append(citation)
@@ -229,47 +405,56 @@ class PolicyRAG:
 
         return citations
 
-    # ---------- 6. GEMINI LLM ANSWER ----------
+    # ----------------------------------------------------------------
+    # 8. GEMINI ANSWER GENERATION
+    # ----------------------------------------------------------------
 
     def generate_answer(
         self,
         query: str,
         results: List[Dict],
     ) -> str:
-        """Generate a short, grounded answer using Gemini."""
+        """
+        Generate a short, grounded answer using Gemini.
+        """
         if not results:
             return (
-                "I could not find relevant information in the company policy "
-                "documents."
+                "I could not find relevant information in "
+                "the company policy documents."
             )
 
-        # Send the retrieved policy text to Gemini.
-        context = self.build_context(results)
-
         load_dotenv()
+
         api_key = os.getenv("GEMINI_API_KEY")
 
         if not api_key:
             return (
-                "GEMINI_API_KEY is missing. Add it to the .env file "
-                "to generate the final answer."
+                "GEMINI_API_KEY is missing. Add it to the "
+                ".env file to generate the final answer."
             )
 
-        client = genai.Client(api_key=api_key)
+        context = self.build_context(results)
+
+        client = genai.Client(
+            api_key=api_key
+        )
 
         prompt = f"""
 You are the policy assistant for TechNova Pvt. Ltd.
 
-Answer the employee's question using ONLY the retrieved policy context.
+Answer the employee's question using ONLY the retrieved
+policy context.
 
 STRICT RULES:
-1. Give ONLY the direct answer.
+1. Give only the direct answer.
 2. Keep the answer to 2 or 3 short lines maximum.
-3. Do NOT reproduce the PDF or the retrieved chunk.
-4. Do NOT mention unrelated policies.
-5. Do NOT invent or assume any policy rule.
-6. If the answer is not present in the context, say: "The available policy documents do not provide this information."
-7. Do NOT add a source/citation; the Python program will add the citation separately.
+3. Do not reproduce the PDF or the retrieved chunks.
+4. Do not mention unrelated policies.
+5. Do not invent or assume any policy rule.
+6. If the answer is not present in the context, say:
+   "The available policy documents do not provide this information."
+7. Do not add a source or citation.
+   The Python program will add the citation separately.
 
 Employee question:
 {query}
@@ -279,18 +464,25 @@ Retrieved policy context:
 """
 
         response = client.models.generate_content(
-            model="gemini-3.6-flash",
+            model=GEMINI_MODEL,
             contents=prompt,
         )
 
-        answer = (response.text or "").strip()
+        answer = (
+            response.text or ""
+        ).strip()
 
         if not answer:
-            return "The available policy documents do not provide this information."
+            return (
+                "The available policy documents do not "
+                "provide this information."
+            )
 
         return answer
 
-    # ---------- 7. ONE PUBLIC FUNCTION FOR OTHER TEAM MEMBERS ----------
+    # ----------------------------------------------------------------
+    # 9. PUBLIC FUNCTION FOR OTHER TEAM MEMBERS
+    # ----------------------------------------------------------------
 
     def search_company_policy(
         self,
@@ -299,7 +491,7 @@ Retrieved policy context:
         generate_llm_answer: bool = False,
     ) -> Dict:
         """
-        Main function that Person 2 / the final application can call.
+        Main function that router.py or app.py can call.
 
         Returns:
             {
@@ -308,18 +500,36 @@ Retrieved policy context:
                 "results": [...]
             }
         """
-        results = self.search(query, top_k=top_k)
-        sources = self.build_citations(results)
+        results = self.search(
+            query,
+            top_k=top_k,
+        )
+
+        sources = self.build_citations(
+            results
+        )
 
         if generate_llm_answer:
-            answer = self.generate_answer(query, results)
-        else:
-            answer = (
-                "Relevant policy information retrieved successfully.\n\n"
-                + "\n\n".join(
-                    f"- {item['text']}" for item in results
-                )
+            answer = self.generate_answer(
+                query,
+                results,
             )
+
+        else:
+            if not results:
+                answer = (
+                    "I could not find relevant information "
+                    "in the company policy documents."
+                )
+
+            else:
+                answer = (
+                    "Relevant policy information:\n\n"
+                    + "\n\n".join(
+                        f"- {item['text']}"
+                        for item in results
+                    )
+                )
 
         return {
             "answer": answer,
@@ -328,27 +538,54 @@ Retrieved policy context:
         }
 
 
+# -------------------------------------------------------------------
+# 10. BUILD RAG
+# -------------------------------------------------------------------
+
 def build_rag() -> PolicyRAG:
-    """Reusable setup function for app.py / router.py."""
+    """
+    Reusable setup function for app.py or router.py.
+    """
     rag = PolicyRAG()
+
     documents = rag.load_pdfs()
-    rag.create_chunks(documents)
+
+    rag.create_chunks(
+        documents
+    )
+
     rag.build_index()
+
     return rag
 
 
-def print_retrieval_results(results: List[Dict]) -> None:
-    """Pretty-print retrieval results for testing."""
+# -------------------------------------------------------------------
+# 11. PRINT RETRIEVAL RESULTS
+# -------------------------------------------------------------------
+
+def print_retrieval_results(
+    results: List[Dict],
+) -> None:
+    """
+    Pretty-print retrieved chunks for debugging.
+    """
     print("\n" + "=" * 70)
     print("TOP RETRIEVED POLICY CHUNKS")
     print("=" * 70)
 
-    for i, result in enumerate(results, start=1):
-        print(f"\n{i}. Score: {result['score']:.4f}")
+    for number, result in enumerate(
+        results,
+        start=1,
+    ):
+        print(f"\n{number}. Score: {result['score']:.4f}")
         print(f"   Source: {result['source']}")
         print(f"   Page: {result['page']}")
         print(f"   Text: {result['text']}")
 
+
+# -------------------------------------------------------------------
+# 12. COMMAND-LINE TEST
+# -------------------------------------------------------------------
 
 def main() -> None:
     print("Building TechNova Policy RAG...")
@@ -356,11 +593,17 @@ def main() -> None:
 
     rag = build_rag()
 
-    print(f"Loaded {len(rag.chunks)} chunks from company policy PDFs.")
+    print(
+        f"Loaded {len(rag.chunks)} chunks "
+        "from company policy PDFs."
+    )
+
     print("\nType 'exit' to stop.")
 
     while True:
-        query = input("\nEmployee question: ").strip()
+        query = input(
+            "\nEmployee question: "
+        ).strip()
 
         if query.lower() == "exit":
             break
@@ -368,23 +611,39 @@ def main() -> None:
         if not query:
             continue
 
-        results = rag.search(query, top_k=TOP_K)
+        results = rag.search(
+            query,
+            top_k=TOP_K,
+        )
 
-        # Generate the final concise answer using Gemini.
         print("\n" + "-" * 70)
         print("ANSWER")
         print("-" * 70)
-        print(rag.generate_answer(query, results))
 
-        # Show the PDF/page used by RAG.
+        # Retrieval-only answer. This does not use Gemini.
+        result = rag.search_company_policy(
+            query,
+            top_k=TOP_K,
+            generate_llm_answer=False,
+        )
+
+        print(result["answer"])
+
         print("\n" + "-" * 70)
         print("SOURCE")
         print("-" * 70)
 
-        citations = rag.build_citations(results)
+        citations = rag.build_citations(
+            results
+        )
+
         for citation in citations:
             print(f"- {citation}")
 
+
+# -------------------------------------------------------------------
+# ENTRY POINT
+# -------------------------------------------------------------------
 
 if __name__ == "__main__":
     main()

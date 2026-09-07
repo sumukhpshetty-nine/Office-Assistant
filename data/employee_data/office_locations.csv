@@ -1,0 +1,6 @@
+location,office_name,address,working_hours,facilities
+Bangalore,TechNova Bangalore Office,RMZ Ecoworld,9 AM - 6 PM,Cafeteria;Gym;Parking
+Chennai,TechNova Chennai Office,OMR IT Park,9 AM - 6 PM,Cafeteria;Parking;Meeting Rooms
+Mumbai,TechNova Mumbai Office,BKC Business Center,9 AM - 6 PM,Cafeteria;Parking;Gym
+Hyderabad,TechNova Hyderabad Office,HITEC City,9 AM - 6 PM,Cafeteria;Parking;Meeting Rooms
+Delhi,TechNova Delhi Office,Gurgaon Cyber Hub,9 AM - 6 PM,Cafeteria;Parking;Gym

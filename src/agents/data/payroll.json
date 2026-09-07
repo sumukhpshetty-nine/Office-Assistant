@@ -1,0 +1,16 @@
+[
+  {
+    "employee_id": "EMP001",
+    "basic_salary": 50000,
+    "monthly_salary": 65000,
+    "annual_salary": 780000,
+    "currency": "INR"
+  },
+  {
+    "employee_id": "EMP002",
+    "basic_salary": 45000,
+    "monthly_salary": 60000,
+    "annual_salary": 720000,
+    "currency": "INR"
+  }
+]

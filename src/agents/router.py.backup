@@ -1,0 +1,179 @@
+from src.agents.intent_agent import IntentAgent
+
+from src.tools.leave_tool import get_leave_balance
+from src.tools.expense_tool import get_expenses
+from src.tools.it_tool import get_it_assets
+from src.tools.office_tool import get_office_details
+
+
+def format_leave_response(result):
+    if not result.get("success"):
+        return result.get("message", "Unable to retrieve leave balance.")
+
+    return (
+        f"Your leave balance is:\n"
+        f"- Casual leave: {result['casual_leave']}\n"
+        f"- Earned leave: {result['earned_leave']}\n"
+        f"- Sick leave: {result['sick_leave']}"
+    )
+
+
+def format_expense_response(result):
+    if not result.get("success"):
+        return result.get("message", "Unable to retrieve expenses.")
+
+    expenses = result.get("expenses", [])
+
+    response = (
+        f"Your total expenses are "
+        f"{result['total_expenses']:,.2f}.\n\n"
+        f"Expense records:\n"
+    )
+
+    for expense in expenses:
+        response += (
+            f"- {expense.get('category', 'Unknown category')}: "
+            f"{expense.get('amount', 0):,.2f}\n"
+        )
+
+    return response
+
+
+def format_it_response(result):
+    if not result.get("success"):
+        return result.get("message", "Unable to retrieve IT assets.")
+
+    assets = result.get("assets", [])
+
+    response = "Your assigned IT assets are:\n"
+
+    for asset in assets:
+        response += (
+            f"- {asset.get('asset_type', 'Asset')}: "
+            f"{asset.get('asset_name', asset.get('model', 'Not specified'))}\n"
+        )
+
+    return response
+
+
+def format_office_response(result):
+    if not result.get("success"):
+        return result.get("message", "Office location not found.")
+
+    office = result.get("office", {})
+
+    response = "Office details:\n"
+
+    for key, value in office.items():
+        response += f"- {key.replace('_', ' ').title()}: {value}\n"
+
+    return response
+
+
+def extract_office_location(query):
+    """
+    Basic location extraction.
+
+    This can later be replaced with an LLM-based entity extractor.
+    """
+    locations = [
+        "Chennai",
+        "Bangalore",
+        "Bengaluru",
+        "Hyderabad",
+        "Mumbai",
+        "Delhi",
+        "Pune",
+    ]
+
+    query_lower = query.lower()
+
+    for location in locations:
+        if location.lower() in query_lower:
+            return location
+
+    return None
+
+
+def process_request(query, employee_id, chat_history=None):
+    if not query or not query.strip():
+        return "Please enter a question."
+
+    if not employee_id or not employee_id.strip():
+        return "Please enter your employee ID."
+
+    chat_history = chat_history or []
+
+    try:
+        intent_agent = IntentAgent()
+
+        intent_result = intent_agent.classify(
+            query=query,
+            history=chat_history,
+        )
+
+        intent = intent_result.get("intent", "").lower()
+        confidence = float(intent_result.get("confidence", 0))
+
+        if confidence < 0.50:
+            return (
+                "I am not confident about the type of request. "
+                "Could you please rephrase your question?"
+            )
+
+        if intent == "policy_query":
+            return (
+                "Policy-related questions will be handled by the "
+                "company policy RAG agent."
+            )
+
+        if intent == "leave_balance":
+            result = get_leave_balance(employee_id)
+            return format_leave_response(result)
+
+        if intent == "expense_query":
+            result = get_expenses(employee_id)
+            return format_expense_response(result)
+
+        if intent == "it_asset_query":
+            result = get_it_assets(employee_id)
+            return format_it_response(result)
+
+        if intent == "office_location":
+            location = extract_office_location(query)
+
+            if not location:
+                return (
+                    "Please specify the office location, such as "
+                    "Chennai, Bangalore, Hyderabad, or Mumbai."
+                )
+
+            result = get_office_details(location)
+            return format_office_response(result)
+
+        if intent == "general_query":
+            return (
+                "I can help you with company policies, leave balance, "
+                "expenses, assigned IT assets, and office locations."
+            )
+
+        return (
+            "I could not identify the appropriate request type. "
+            "Please rephrase your question."
+        )
+
+    except ValueError as error:
+        return str(error)
+
+    except FileNotFoundError:
+        return (
+            "The required data file is missing. "
+            "Please contact the administrator."
+        )
+
+    except Exception as error:
+        print(f"Router error: {error}")
+        return (
+            "Sorry, something went wrong while processing your request. "
+            "Please try again."
+        )

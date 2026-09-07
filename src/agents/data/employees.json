@@ -1,0 +1,18 @@
+[
+  {
+    "employee_id": "EMP001",
+    "name": "Sudeep Patil",
+    "department": "Engineering",
+    "designation": "Data Analyst",
+    "manager": "Rahul Sharma",
+    "leave_balance": 18
+  },
+  {
+    "employee_id": "EMP002",
+    "name": "Ananya Rao",
+    "department": "Human Resources",
+    "designation": "HR Executive",
+    "manager": "Priya Menon",
+    "leave_balance": 15
+  }
+]
