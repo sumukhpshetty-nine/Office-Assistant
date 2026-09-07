@@ -1,3 +1,4 @@
+from src.tools.tool_registry import EMPLOYEE_TOOLS
 from src.tools.employee_tool import get_employee, search_employee
 from src.tools.leave_tool import get_leave_balance
 from src.tools.expense_tool import get_expenses_by_category
@@ -22,3 +23,6 @@ print(get_it_assets("EMP001"))
 
 print("\n===== OFFICE DETAILS =====")
 print(get_office_details("Bangalore"))
+
+print("\n===== TOOL REGISTRY =====")
+print(list(EMPLOYEE_TOOLS.keys()))

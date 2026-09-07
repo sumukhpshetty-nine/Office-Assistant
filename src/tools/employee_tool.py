@@ -1,10 +1,11 @@
 import pandas as pd
 
-EMPLOYEE_FILE = "data/employee_data/employees.csv"
+from src.paths import EMPLOYEE_FILE
 
 
 def get_employee(employee_id):
     """Return employee details for a given employee ID."""
+
     df = pd.read_csv(EMPLOYEE_FILE)
 
     employee = df[df["employee_id"] == employee_id]
@@ -25,6 +26,7 @@ def get_employee(employee_id):
 
 def search_employee(name):
     """Search employees by name."""
+
     df = pd.read_csv(EMPLOYEE_FILE)
 
     matches = df[

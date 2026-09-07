@@ -1,6 +1,6 @@
 import pandas as pd
 
-IT_FILE = "data/employee_data/IT_assets.csv"
+from src.paths import IT_FILE
 
 
 def get_it_assets(employee_id):

@@ -1,6 +1,6 @@
 import pandas as pd
 
-LEAVE_FILE = "data/employee_data/leave_balance.csv"
+from src.paths import LEAVE_FILE
 
 
 def get_leave_balance(employee_id):

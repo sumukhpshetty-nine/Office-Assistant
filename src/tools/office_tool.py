@@ -1,6 +1,6 @@
 import pandas as pd
 
-OFFICE_FILE = "data/employee_data/office_locations.csv"
+from src.paths import OFFICE_FILE
 
 
 def get_office_details(location):
