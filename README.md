@@ -5,9 +5,12 @@ An AI-powered office assistant for TechNova Pvt. Ltd. that helps employees acces
 ## Features
 
 - Company policy question answering using PDF documents
-- Local PDF text extraction and sentence-aware chunking
-- Semantic search using Sentence Transformers
-- FAISS vector database for document retrieval
+- Gemini-powered intent classification
+- Gemini-powered policy answer generation
+- Local PDF text extraction
+- Sentence-aware overlapping text chunking
+- Sentence Transformer embeddings
+- FAISS vector database for semantic search
 - Employee information lookup
 - Employee leave-balance lookup
 - Payroll and salary information lookup
@@ -15,7 +18,6 @@ An AI-powered office assistant for TechNova Pvt. Ltd. that helps employees acces
 - Office location queries
 - Intent-based request routing
 - Streamlit user interface
-- Local LLM support through Ollama
 
 ## Project Architecture
 
@@ -26,6 +28,7 @@ Office_Assistant/
 ├── README.md
 ├── .gitignore
 ├── requirements.txt
+├── .env
 │
 ├── data/
 │   └── documents/
@@ -56,7 +59,7 @@ Employee Query
 Streamlit Interface
       │
       ▼
-Intent Classification
+Gemini Intent Classification
       │
       ├── Policy Query ───────► PDF RAG
       │                              │
@@ -64,7 +67,7 @@ Intent Classification
       │                       FAISS Retrieval
       │                              │
       │                              ▼
-      │                       Ollama Answer
+      │                       Gemini Answer
       │
       ├── Employee Query ────► Employee Agent
       │
@@ -81,8 +84,8 @@ Intent Classification
 
 - Python
 - Streamlit
-- Ollama
-- Llama 3.2
+- Google Gemini API
+- Google Gen AI SDK
 - Sentence Transformers
 - FAISS
 - PyPDF
@@ -118,41 +121,19 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 5. Install and run Ollama
-
-Install Ollama from the official website:
-
-https://ollama.com/
-
-Download the required model:
-
-```bash
-ollama pull llama3.2:3b
-```
-
-Start Ollama if it is not already running:
-
-```bash
-ollama serve
-```
-
-The default Ollama API endpoint is:
-
-```text
-http://127.0.0.1:11434/api/generate
-```
-
-### 6. Configure environment variables
+### 5. Configure the Gemini API
 
 Create a `.env` file in the project root:
 
 ```env
-LLM_PROVIDER=ollama
-OLLAMA_URL=http://127.0.0.1:11434/api/generate
-OLLAMA_MODEL=llama3.2:3b
+GEMINI_API_KEY=your_gemini_api_key
 ```
 
-Do not commit `.env` or API keys to GitHub.
+You can obtain a Gemini API key from:
+
+https://aistudio.google.com/app/apikey
+
+**Never commit your `.env` file or API key to GitHub.**
 
 ## Running the Application
 
@@ -178,7 +159,8 @@ This will:
 4. Generate embeddings
 5. Build a FAISS index
 6. Retrieve relevant policy chunks
-7. Display the retrieved information and sources
+7. Generate answers using Gemini
+8. Display the retrieved sources
 
 ## Example Queries
 
@@ -235,7 +217,7 @@ Semantic Similarity Search
 Relevant Policy Context
       │
       ▼
-Ollama LLM
+Gemini API
       │
       ▼
 Grounded Answer with Sources
